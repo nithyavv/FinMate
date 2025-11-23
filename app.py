@@ -1,11 +1,11 @@
 """
-FinMate, Generative AI Financial Assistant —  MVP
+FinMate, Generative AI Financial Assistant — MVP
 
 Run:
     streamlit run app.py
 
 Features:
-- Upload or simulate transaction data (CSV)
+- Upload, simulate, or "connect" (simulated) to bank/UPI for transaction data (CSV-like)
 - Auto-categorization of spending
 - Simple insights (dining > X%, debt payments, subscriptions, etc.)
 - RAG-style retrieval over:
@@ -13,13 +13,20 @@ Features:
     - User-provided knowledge base docs
 - Conversational Q&A with:
     - Tone adaptation (neutral / reassuring / encouraging)
-    - Optional OpenAI LLM integration (if OPENAI_API_KEY set)
+    - Optional OpenAI LLM integration (if OPENAI_API_KEY set, legacy ChatCompletion style)
     - Fallback deterministic generator
 - Explainability trace: shows retrieved snippets & insights used
+- Elder-friendly mode (bigger text & simplified summary)
+- Simulated Bank / UPI connector (Option 3 in data section)
+- Net income metric (Income - Spend)
+- Cashflow risk indicator (month-end risk)
+- Recurring bills & subscriptions view
+- Money Wellness Score (gamified scoring with explanation)
+- Savings Goal Planner (goal amount + date → monthly saving)
 """
 
 from __future__ import annotations
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 from typing import List, Dict, Any
 import os
 import re
@@ -33,7 +40,6 @@ from sklearn.metrics.pairwise import cosine_similarity
 
 from dotenv import load_dotenv
 
-# Optional: OpenAI
 try:
     import openai
 except ImportError:
@@ -198,13 +204,12 @@ def deterministic_generator(context: Dict[str, Any], question: str, tone: str) -
 
 def call_llm_with_openai(prompt: str) -> str:
     """
-    Optional: call OpenAI ChatCompletion API.
+    Optional: call OpenAI ChatCompletion API (legacy style).
     Uses gpt-4o-mini for cost-effective reasoning.
     """
     if openai is None or not OPENAI_API_KEY:
         raise RuntimeError("OpenAI not configured.")
 
-    # NOTE: This uses the classic ChatCompletion style for hackathon simplicity.
     resp = openai.ChatCompletion.create(
         model="gpt-4o-mini",
         messages=[
@@ -224,17 +229,92 @@ def call_llm_with_openai(prompt: str) -> str:
 
 
 # ---------------------------
+# Helper: Money wellness score
+# ---------------------------
+
+def compute_wellness_score(
+    total_income: float,
+    total_spend: float,
+    dining_share: float,
+    has_debt: bool,
+) -> Dict[str, Any]:
+    """
+    Very simple gamified score out of 100.
+
+    - Base score: 50
+    - + up to 30 points for savings rate
+    - - up to 10 points for high dining share
+    - - up to 10 points if debt present
+    """
+    explanations: List[str] = []
+    score = 50
+
+    savings = max(total_income - total_spend, 0)
+    savings_rate = (savings / total_income) if total_income > 0 else 0
+
+    # Savings contribution
+    if savings_rate >= 0.3:
+        score += 30
+        explanations.append("High savings rate (≥30% of income) adds +30 points.")
+    elif savings_rate >= 0.15:
+        score += 20
+        explanations.append("Decent savings rate (15–30% of income) adds +20 points.")
+    elif savings_rate >= 0.05:
+        score += 10
+        explanations.append("Some savings (5–15% of income) adds +10 points.")
+    else:
+        explanations.append("Low savings rate (<5% of income) adds no extra points.")
+
+    # Dining penalty
+    if dining_share > 0.3:
+        score -= 10
+        explanations.append("Very high dining share (>30% of spend) subtracts 10 points.")
+    elif dining_share > 0.2:
+        score -= 5
+        explanations.append("Somewhat high dining share (20–30% of spend) subtracts 5 points.")
+    else:
+        explanations.append("Dining spend is within a reasonable range.")
+
+    # Debt penalty
+    if has_debt:
+        score -= 10
+        explanations.append("Debt/EMI payments detected → -10 points for risk.")
+    else:
+        explanations.append("No debt payments detected in recent data.")
+
+    score = max(0, min(100, int(round(score))))
+    return {"score": score, "details": explanations, "savings_rate": savings_rate}
+
+
+# ---------------------------
 # Streamlit UI Layout
 # ---------------------------
 
-st.title("💰 FinMate, Generative AI Financial Assistant —  MVP")
+st.title("💰 FinMate, Generative AI Financial Assistant")
 st.caption("Personalized, conversational, explainable money guidance (demo).")
+
+# Accessibility toggle (elder-friendly mode)
+elder_mode = st.sidebar.checkbox("Elder-friendly mode (larger text & simplified view)", value=False)
+
+# Simple CSS for elder-friendly mode
+if elder_mode:
+    st.markdown(
+        """
+        <style>
+        body, .stMarkdown, .stTextInput, .stTextArea, .stMetric, .stDataFrame {
+            font-size: 18px !important;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
 
 with st.sidebar:
     st.header("About this demo")
     st.write(
         """
         - Upload your own CSV or use sample data.
+        - Or simulate a Bank / UPI connection.
         - Data is processed locally in this demo.
         - Optional: add knowledge snippets (goals, rules).
         - Ask questions in natural language.
@@ -259,14 +339,18 @@ if "tx" not in st.session_state:
 if "kb_docs" not in st.session_state:
     st.session_state["kb_docs"] = []  # each: {title, text}
 
-# ---------------------------
-# 1) Data Upload & Preview
-# ---------------------------
-st.header("1. Upload Transactions or Use Sample")
+if "data_source" not in st.session_state:
+    st.session_state["data_source"] = "sample"  # 'sample' | 'csv' | 'bank'
 
-upload_col, sample_col = st.columns([2, 1])
+# ---------------------------
+# 1) Data Upload & Preview / Bank Connect
+# ---------------------------
+st.header("Connect Accounts or Upload Data")
+
+upload_col, sample_col, bank_col = st.columns([2, 1, 1])
 
 with upload_col:
+    st.markdown("**Upload bank statement (CSV)**")
     uploaded = st.file_uploader(
         "Upload CSV with at least: timestamp, amount, merchant, raw_desc (account optional).",
         type=["csv"],
@@ -275,14 +359,36 @@ with upload_col:
         try:
             df = pd.read_csv(uploaded)
             st.session_state["tx"] = df
-            st.success("Transactions loaded from CSV.")
+            st.session_state["data_source"] = "csv"
+            st.success("Transactions loaded from uploaded CSV (simulated bank statement).")
         except Exception as e:
             st.error(f"Failed to read CSV: {e}")
 
 with sample_col:
+    st.markdown("**Use sample dataset (Demo Purpose)**")
     if st.button("Use sample dataset"):
         st.session_state["tx"] = sample_transactions()
+        st.session_state["data_source"] = "sample"
         st.info("Sample transactions loaded.")
+
+with bank_col:
+    st.markdown("**Connect to Bank / UPI (Simulated)**")
+    st.write(
+        "In production, this would use Account Aggregator / bank APIs "
+        "with user consent to fetch transactions securely."
+    )
+    if st.button("Connect bank (demo)"):
+        st.session_state["tx"] = sample_transactions()
+        st.session_state["data_source"] = "bank"
+        st.success("Bank connection simulated. Recent transactions fetched (demo).")
+
+source_label = {
+    "sample": "Sample dataset",
+    "csv": "Uploaded CSV (simulated bank statement)",
+    "bank": "Simulated live bank / UPI connection",
+}.get(st.session_state.get("data_source", "sample"), "Sample dataset")
+
+st.caption(f"Current transaction source: **{source_label}**")
 
 tx = st.session_state["tx"].copy()
 
@@ -313,7 +419,7 @@ st.dataframe(
 # ---------------------------
 # 2) Analytics & Insights
 # ---------------------------
-st.header("2. Quick Analytics & Insights")
+st.header("Quick Analytics & Insights")
 
 last_30_mask = tx["timestamp"] >= (pd.Timestamp.now() - pd.Timedelta(days=30))
 last_30 = tx[last_30_mask].copy()
@@ -321,11 +427,14 @@ last_30 = tx[last_30_mask].copy()
 total_income = last_30[last_30["amount"] > 0]["amount"].sum()
 total_spend = -last_30[last_30["amount"] < 0]["amount"].sum()
 
-m1, m2 = st.columns(2)
+m1, m2, m3 = st.columns(3)
 with m1:
     st.metric("Income (last 30 days)", f"{total_income:,.2f} INR")
 with m2:
     st.metric("Spend (last 30 days)", f"{total_spend:,.2f} INR")
+with m3:
+    net = total_income - total_spend
+    st.metric("Net (Income - Spend)", f"{net:,.2f} INR")
 
 st.write("Top spend categories (last 30 days):")
 
@@ -344,6 +453,7 @@ insights: List[Dict[str, Any]] = []
 if not cat_summary.empty:
     total_abs = cat_summary.sum()
     dining_val = cat_summary.get("Dining", 0.0)
+    dining_share = float(dining_val / total_abs) if total_abs > 0 else 0.0
     if dining_val > 0.2 * total_abs:
         insights.append(
             {
@@ -353,6 +463,8 @@ if not cat_summary.empty:
                 "explain": f"Dining is about {dining_val:,.0f} INR, more than 20% of your total spend in the last 30 days.",
             }
         )
+else:
+    dining_share = 0.0
 
 subs = tx[tx["category"] == "Subscriptions"]
 if len(subs) > 0:
@@ -366,7 +478,8 @@ if len(subs) > 0:
     )
 
 debt = tx[tx["category"] == "Debt"]
-if len(debt) > 0:
+has_debt = len(debt) > 0
+if has_debt:
     insights.append(
         {
             "id": "ins3",
@@ -391,12 +504,67 @@ for ins in insights:
     st.markdown(f"**➤ {ins['title']}** _({ins['severity']})_")
     st.write(ins["explain"])
 
+# ---------------------------
+# 2a) Extended Analysis: Cashflow, Recurring, Wellness
+# ---------------------------
+st.markdown("### Extended Analysis")
+
+col_a, col_b, col_c = st.columns(3)
+
+# Cashflow risk indicator
+with col_a:
+    days_left = 30  # simple assumption for demo
+    avg_daily_spend = (total_spend / 30.0) if total_spend > 0 else 0
+    projected_spend = avg_daily_spend * days_left
+    projected_balance = total_income - projected_spend
+    if projected_balance < 0:
+        risk_msg = "High risk of running short by month-end."
+    elif projected_balance < 0.1 * total_income:
+        risk_msg = "Tight but manageable. Consider reducing variable spend."
+    else:
+        risk_msg = "Cashflow looks comfortable for this month."
+    st.markdown("**Cashflow Outlook**")
+    st.write(f"Projected month-end balance (rough): {projected_balance:,.0f} INR")
+    st.write(risk_msg)
+
+# Recurring bills & subscriptions
+with col_b:
+    st.markdown("**Recurring Bills & Subscriptions**")
+    recurring = tx[tx["category"].isin(["Housing", "Utilities", "Debt", "Subscriptions"])]
+    if recurring.empty:
+        st.write("No obvious recurring bills detected in this sample.")
+    else:
+        show_cols = ["timestamp", "merchant", "amount", "category", "raw_desc"]
+        st.dataframe(
+            recurring.sort_values("timestamp", ascending=False)[show_cols].head(10),
+            height=200,
+        )
+
+# Money wellness score
+with col_c:
+    st.markdown("**Money Wellness Score**")
+    score_info = compute_wellness_score(total_income, total_spend, dining_share, has_debt)
+    st.metric("Wellness Score (0–100)", score_info["score"])
+    with st.expander("Why this score?"):
+        for line in score_info["details"]:
+            st.write("- " + line)
+
+# Elder-friendly simple summary
+if elder_mode:
+    st.markdown("---")
+    st.markdown("### 👵 Elder-friendly Summary")
+    st.write(
+        f"In the last 30 days, income was about **{total_income:,.0f} INR** and spending was about "
+        f"**{total_spend:,.0f} INR**. Your money wellness score is **{score_info['score']} / 100**."
+    )
+    st.write("Focus on: keeping some savings, watching dining and subscriptions, and managing any EMIs calmly.")
+
 st.markdown("---")
 
 # ---------------------------
 # 3) Knowledge Base (for RAG)
 # ---------------------------
-st.header("3. Knowledge Base (Goals, Rules, Preferences)")
+st.header("Knowledge Base (Goals, Rules, Preferences)")
 
 kb_col1, kb_col2 = st.columns([2, 1])
 
@@ -429,9 +597,40 @@ with kb_col2:
 st.markdown("---")
 
 # ---------------------------
+# 3a) Savings Goal Planner
+# ---------------------------
+st.header("Savings Goal Planner")
+
+goal_col1, goal_col2, goal_col3 = st.columns(3)
+with goal_col1:
+    goal_amount = st.number_input("Goal amount (INR)", min_value=0.0, value=100000.0, step=1000.0)
+with goal_col2:
+    goal_date = st.date_input("Target date", value=date.today())
+with goal_col3:
+    current_savings = st.number_input("Current savings for this goal (optional)", min_value=0.0, value=0.0, step=1000.0)
+
+if st.button("Calculate Goal Plan"):
+    days_to_goal = (goal_date - date.today()).days
+    if days_to_goal <= 0:
+        st.error("Please choose a future date for your goal.")
+    else:
+        remaining = max(goal_amount - current_savings, 0)
+        months_to_goal = max(days_to_goal / 30.0, 1)
+        required_per_month = remaining / months_to_goal
+        st.success(
+            f"To reach **{goal_amount:,.0f} INR** by **{goal_date}**, "
+            f"you need to save approximately **{required_per_month:,.0f} INR per month**."
+        )
+        if total_income > 0:
+            share = required_per_month / total_income
+            st.write(f"That is about **{share*100:.1f}%** of your recent monthly income.")
+
+st.markdown("---")
+
+# ---------------------------
 # 4) Conversational Assistant (RAG-style)
 # ---------------------------
-st.header("4. Ask the Assistant")
+st.header("Ask the Assistant")
 
 question = st.text_area(
     "Ask anything about your finances:",
@@ -532,6 +731,8 @@ if st.button("Ask Assistant"):
             "retrieved_examples": [r["text"][:200] for r in retrieved],
             "high_spend_categories": high_spend_categories,
             "insights_used": insights,
+            "wellness_score": score_info,
+            "data_source": st.session_state.get("data_source", "sample"),
         }
         st.json(trace)
 
@@ -539,7 +740,7 @@ if st.button("Ask Assistant"):
 # 5) Export
 # ---------------------------
 st.markdown("---")
-st.header("5. Export Data")
+st.header("Export Data")
 
 csv_export = tx.to_csv(index=False)
 st.download_button(

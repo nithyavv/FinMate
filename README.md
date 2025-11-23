@@ -1,87 +1,99 @@
-# Generative AI Financial Assistant
+# FinMate — Generative AI Financial Assistant ( MVP)
 
-## 1. Problem
+**Personalized • Explainable • Conversational • Financial Wellness**
 
-Traditional banking apps show numbers, not guidance.  
-Young professionals, freelancers, and families (especially in emerging markets) struggle with:
+FinMate is a **Generative AI–powered personal finance assistant** designed to make money management **simple, contextual, and actionable** for everyone — especially young professionals, families, freelancers, and the elderly.
 
-- Understanding spending patterns
-- Managing debt and credit
-- Planning realistic savings and goals
-
-We ask: **What if your money app talked like a trusted advisor?**
+This MVP demonstrates how AI + lightweight analytics + RAG can turn raw transaction data into **clear insights**, **human-like conversations**, and **smart financial guidance**.
 
 ---
 
-## 2. Solution
+## Features Included in This MVP
 
-A **Generative AI–powered financial assistant** that:
+### 1. Transaction Upload / Simulated Bank Connect
+- Upload CSV bank statements  
+- Use sample dataset  
+- Simulate a “Bank / UPI connection” (demo mode)
 
-- Connects to transaction data (CSV in this MVP)
-- Detects patterns in spending, income, and debt
-- Uses a RAG-style approach to answer natural language questions
-- Speaks in a friendly, contextual tone based on user sentiment
-- Provides **explainable** insights (which transactions influenced the advice)
+### 2. Automatic Categorization
+Uses rule-based classifier (Dining, Debt, Groceries, Subscriptions, Income, Utilities, Other).
 
-### Core Features in This MVP
+### 3. Quick Analytics
+- Income vs Spend (last 30 days)  
+- Net Income (Income – Spend)  
+- Category-wise spend summary  
+- Subscription detection  
+- Debt/EMI detection  
+- Dining overspend alerts  
 
-- Upload or simulate bank transactions
-- Auto-categorize spending (Dining, Groceries, Debt, etc.)
-- Show basic analytics: income vs spend, top categories
-- Heuristic **“insights”** (e.g., dining spend is high, debt payments detected)
-- User can add personal **knowledge snippets** (budgets, rules, goals)
-- Ask natural questions:
-  - “Can I afford a vacation next month?”
-  - “How do I reduce my loan burden?”
-- Retrieval over:
-  - Recent transactions
-  - User KB docs
-- Explainability:
-  - Shows which text snippets were retrieved
-  - Lists heuristic insights used by the assistant
-- Tone adapts based on user message (neutral / reassuring / encouraging)
+### 4. Enhanced Analytics
+- **Cashflow Outlook** (month-end risk forecast)  
+- **Recurring Bills Dashboard**  
+- **Money Wellness Score (0–100)** with breakdown  
+- **Savings Rate**  
+- **Lifestyle Insight Flags**  
 
----
+### 5. Savings Goal Planner
+Enter:
+- Goal amount  
+- Target date  
+- Current savings  
 
-## 3. Tech Stack
+→ App calculates required monthly saving.
 
-- **Language:** Python
-- **Frontend:** Streamlit
-- **Core Libraries:**
-  - `pandas`, `numpy` — data handling
-  - `scikit-learn` — simple TF-IDF retrieval
-  - `streamlit` — UI
-- **Optional GenAI:**
-  - `openai` (only if `OPENAI_API_KEY` is set)
+### 6. Elder-Friendly Mode
+- Larger text  
+- Simplified summary  
+- Clear tone and instructions  
 
-This MVP is intentionally **single-service and single-file** for hackathon.
+### 7. Conversational Assistant (RAG-style)
+- TF-IDF retriever over:
+  - Recent transactions  
+  - User’s knowledge base docs  
+- Tone adaptation (reassuring, encouraging, neutral)  
+- Uses Generative AI (OpenAI) if available  
+- Falls back to rule-based reasoning if no API key  
 
----
-
-## 4. Architecture (MVP View)
-
-**Data Layer:**
-
-- CSV-based transactions or sample data
-- Derived attributes: categories, simple insights
-- “Knowledge base” snippets stored in memory
-
-**AI/ML:**
-
-- Simple rules for category detection (regex-based)
-- TF-IDF-based retriever over:
-  - KB documents
-  - Recent transaction snippets
-- Optional LLM (OpenAI) to generate natural language answers
-- Deterministic “fallback” generator if no LLM key is provided
-
-**Explainability:**
-
-- Shows retrieved snippets & heuristic insights
-- Short rationale-style answer from the assistant
+### 8. Explainability Panel
+Shows what data the assistant used:
+- Retrieved contexts  
+- High-spend categories  
+- Insights  
+- Used documents/rules  
 
 ---
 
-## 5. How to Run
+## Tech Stack (Hackathon Version)
 
-streamlit run app.py
+### User Interface
+- Streamlit
+
+### Core Logic / Data Processing
+- Python  
+- Pandas  
+- NumPy  
+
+### AI / ML
+- Scikit-learn (TF-IDF + cosine similarity retriever)  
+- OpenAI ChatCompletion API (optional, legacy client `openai==0.28`)  
+- Deterministic fallback generator  
+
+### Config & Secrets
+- python-dotenv  
+
+### Storage
+- Streamlit session state (in-memory)
+
+**No database or vector DB required** for this MVP → lightweight and portable.
+
+---
+
+## Folder Structure
+
+finmate/
+├── app.py
+├── requirements.txt
+├── README.md
+├── .env.example
+└── sample_data/
+    └── sample_transactions.csv
