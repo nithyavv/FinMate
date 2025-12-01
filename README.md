@@ -1,8 +1,8 @@
-# FinMate — Generative AI Financial Assistant ( MVP)
+# FinMate - Generative AI Financial Assistant ( MVP)
 
 **Personalized • Explainable • Conversational • Financial Wellness**
 
-FinMate is a **Generative AI–powered personal finance assistant** designed to make money management **simple, contextual, and actionable** for everyone — especially young professionals, families, freelancers, and the elderly.
+FinMate is a **Generative AI–powered personal finance assistant** designed to make money management **simple, contextual, and actionable** for everyone - especially young professionals, families, freelancers, and the elderly.
 
 This MVP demonstrates how AI + lightweight analytics + RAG can turn raw transaction data into **clear insights**, **human-like conversations**, and **smart financial guidance**.
 
@@ -29,7 +29,7 @@ Uses rule-based classifier (Dining, Debt, Groceries, Subscriptions, Income, Util
 ### 4. Enhanced Analytics
 - **Cashflow Outlook** (month-end risk forecast)  
 - **Recurring Bills Dashboard**  
-- **Money Wellness Score (0–100)** with breakdown  
+- **Money Wellness Score (0-100)** with breakdown  
 - **Savings Rate**  
 - **Lifestyle Insight Flags**  
 
@@ -97,3 +97,4 @@ finmate/
 ├── .env.example
 └── sample_data/
     └── sample_transactions.csv
+
